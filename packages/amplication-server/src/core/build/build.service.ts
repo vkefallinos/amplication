@@ -43,7 +43,8 @@ import { FindManyDeploymentArgs } from '../deployment/dto/FindManyDeploymentArgs
 import { StepNotFoundError } from './errors/StepNotFoundError';
 
 import { GithubService } from '../github/github.service';
-
+import fs from 'fs'
+import simpleGit, { SimpleGit } from 'simple-git';
 export const HOST_VAR = 'HOST';
 export const GENERATE_STEP_MESSAGE = 'Generating Application';
 export const GENERATE_STEP_NAME = 'GENERATE_APPLICATION';
@@ -391,6 +392,50 @@ export class BuildService {
         dataServiceGeneratorLogger.destroy();
 
         await this.actionService.logInfo(step, ACTION_ZIP_LOG);
+        if (process.env.AMP_PROJECTS_PATH) {
+          const projectsPath = process.env.AMP_PROJECTS_PATH
+          const appPath = path.join(projectsPath, build.app.name)
+          let exists = true
+          if (!fs.existsSync(appPath)) {
+            fs.mkdirSync(appPath, { recursive: true })
+            exists = false
+          }
+          const git: SimpleGit = simpleGit(appPath);
+          if (!exists) {
+            await git.init()
+            for (const module of modules) {
+              const filePath = path.join(appPath, module.path)
+              try {
+                fs.mkdirSync(path.dirname(filePath))
+              } catch (err) {
+              }
+              fs.writeFileSync(
+                filePath, module.code,
+              )
+              const add = await git.add(filePath)
+
+            }
+            await git.commit(`GEN: ${build?.commit.message}`)
+          } else {
+            try {
+              await git.checkout('gen-code')
+
+            } catch {
+              await git.checkout(['-b', 'gen-code'])
+
+            }
+            for (const module of modules) {
+              const filePath = path.join(appPath, module.path)
+              fs.writeFileSync(filePath, module.code)
+              await git.add(filePath)
+            }
+
+            await git.commit(`GEN: ${build?.commit.message}`)
+            await git.checkout('master')
+            await git.rebase(['gen-code'])
+          }
+
+        }
 
         const tarballURL = await this.save(build, modules);
 
